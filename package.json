@@ -1,0 +1,22 @@
+{
+  "name": "catalogos",
+  "version": "1.0.0",
+  "description": "Para manejo de catálogos genericos y públicos",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sbfcorp/catalogos.git"
+  },
+  "author": "SBFCorp",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sbfcorp/catalogos/issues"
+  },
+  "homepage": "https://github.com/sbfcorp/catalogos#readme",
+  "dependencies": {
+    "prettier": "^3.5.3"
+  }
+}

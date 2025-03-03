@@ -1,0 +1,122 @@
+name: Prettier format on push
+
+on:
+    push:
+        paths:
+            - "**/*.css"
+            - "**/*.html"
+            - "**/*.json"
+            - "**/*.js"
+            - "**/*.cmp"
+
+jobs:
+    run-prettier-push-format:
+        permissions:
+            contents: write
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4.1.7
+              with:
+                  fetch-depth: 2
+
+            - name: Get changes
+              id: changed-files
+              run: |
+                  needs_format=0
+                  files=''
+                  echo "changed_files=$(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | xargs)" >> $GITHUB_OUTPUT
+                  for file in $(git diff --name-only ${{ github.event.before }} ${{ github.event.after }} | xargs); do
+                    if [ -e "$file" ] &&
+                    ([[ "$file" == *.js || "$file" == *.json || "$file" == *.css || "$file" == *.html || "$file" == *.cmp ]]) &&
+                    [[ "$file" != *_test_* ]] && [[ "$file" != *experiences* ]] && [[ "$file" != *package.json ]] && [[ "$file" != *package-lock.json ]] && [[ "$file" != *yarn.* ]]; then
+                      needs_format=1
+                      files+="$file "
+                    fi
+                  done
+                  if [ $needs_format -eq 1 ]; then
+                    echo "NEEDS FROMAT"
+                    echo "changed_files=$files" >> $GITHUB_OUTPUT
+                    echo "needs_format=1" >> $GITHUB_OUTPUT
+                  else
+                    echo "No files to check."
+                    echo "needs_format=0" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Set up Node.js
+              if: steps.changed-files.outputs.needs_format == 1
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Run Prettier on changed files
+              id: prettier-job
+              if: steps.changed-files.outputs.needs_format == 1
+              run: |
+                  npm i prettier-plugin-apex --legacy-peer-deps
+                  if npx --yes prettier --config .prettierrc --write ${{ steps.changed-files.outputs.changed_files }}  2>&1 | tee /tmp/result.txt; then echo "end format"; fi
+
+            - name: Check if it was failed
+              id: check-for-error
+              if: steps.changed-files.outputs.needs_format == 1
+              run: |
+                  if grep -q "Error" /tmp/result.txt; then
+                    echo "The file contains 'Error'"
+                    echo "error=1" >> $GITHUB_OUTPUT
+                    cat .github/markdown/comment-push-format-error.md >> /tmp/error.md
+                    sed 's/\x1b\[[0-9;]*m//g' /tmp/result.txt > /tmp/cleaned_result.txt
+                    cat /tmp/cleaned_result.txt >> /tmp/error.md
+                    echo '```' >> /tmp/error.md
+                    sed -i 's/github_username/${{ github.actor }}/g' /tmp/error.md
+                  else
+                    echo "No 'Error' found in the file"
+                    echo "error=0" >> $GITHUB_OUTPUT
+                  fi
+
+            - name: Create commit comment for dirty commit
+              uses: peter-evans/commit-comment@v3.0.0
+              if: steps.check-for-error.outputs.error == 1
+              with:
+                  body-path: "/tmp/error.md"
+                  reactions: eyes
+
+            - name: Exit if theres error
+              if: steps.check-for-error.outputs.error == 1
+              run: |
+                  cat /tmp/error.md >> $GITHUB_STEP_SUMMARY
+                  cat /tmp/error.md
+                  exit 1
+
+            - name: Commit format changes
+              if: steps.changed-files.outputs.needs_format == 1 && steps.check-for-error.outputs.error == 0
+              run: |
+                  if git status --porcelain | grep -q .; then
+                    git config --global user.name 'SBF Github Bot'
+                    git config --global user.email 'developer@sbfcorp.com'
+                    git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/$GITHUB_REPOSITORY
+                    git checkout "${GITHUB_REF:11}"
+                    git restore package-lock.json || true
+                    git restore package.json || true
+                    git restore yarn.json || true
+                    git add -A
+                    if git diff --cached --quiet; then
+                        echo '### NO HAY CAMBIOS PENDIENTES' >> $GITHUB_STEP_SUMMARY
+                    else
+                        # Commit and push if there are staged changes
+                        git commit -m "Proceso Prettier Automatizado"
+                        git push
+                        echo '### SE CARGARON LOS CAMBIOS DE FORMATOS' >> $GITHUB_STEP_SUMMARY
+                    fi
+                  else
+                    echo "No hay cambios"
+                    echo '### NO HAY CAMBIOS PENDIENTES' >> $GITHUB_STEP_SUMMARY
+                  fi
+
+            - name: Clean up
+              if: always()
+              run: |
+                  rm -rf /tmp/result.txt
+                  rm -rf /tmp/cleaned_result.txt
+                  rm -rf /tmp/error.md
+              continue-on-error: true
